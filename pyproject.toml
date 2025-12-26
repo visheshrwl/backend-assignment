@@ -1,7 +1,10 @@
 [tool.ruff]
 line-length = 120
+
+[tool.ruff.lint]
 select = ["E", "F", "I", "B"]
 ignore = ["B008"]
+
 
 [tool.mypy]
 strict = false

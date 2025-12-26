@@ -9,13 +9,13 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
+from prometheus_fastapi_instrumentator import metrics as prometheus_metrics
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
 from sqlalchemy import desc, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from prometheus_fastapi_instrumentator import metrics as prometheus_metrics
 
 from app.config import get_settings
 from app.logging_utils import logger
@@ -44,8 +44,16 @@ app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])
 
 # --- Instrumentator ---
 instrumentator = Instrumentator()
-instrumentator.add(prometheus_metrics.requests(metric_name="http_requests_total", should_include_handler=True, should_include_method=True, should_include_status=True))
+instrumentator.add(
+    prometheus_metrics.requests(
+        metric_name="http_requests_total",
+        should_include_handler=True,
+        should_include_method=True,
+        should_include_status=True
+    )
+)
 instrumentator.instrument(app).expose(app)
+
 
 
 
