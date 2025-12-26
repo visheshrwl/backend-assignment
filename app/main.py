@@ -3,9 +3,10 @@ import hmac
 import time
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -28,7 +29,7 @@ settings = get_settings()
 limiter = Limiter(key_func=get_remote_address, default_limits=["100/minute"])
 app = FastAPI()
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler) # type: ignore[arg-type]
 app.add_middleware(SlowAPIMiddleware)
 
 
@@ -65,7 +66,7 @@ async def log_and_metrics_middleware(request: Request, call_next):
     start_time = time.time()
     
     # Context for logging
-    log_context = {
+    log_context: dict[str, Any] = {
         "request_id": request_id,
         "method": request.method,
         "path": request.url.path,
