@@ -1,22 +1,53 @@
-import time
-import hmac
 import hashlib
-from typing import List, Optional
-from datetime import datetime
-from fastapi import FastAPI, Request, HTTPException, Depends, Header, Response
-from fastapi.responses import JSONResponse
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, desc, text
-from app.config import get_settings
-from app.storage import get_db, init_db, insert_message
-from app.models import Message, WebhookPayload, MessageResponse
-from app.logging_utils import logger
-from app.metrics import HTTP_REQUESTS_TOTAL, WEBHOOK_REQUESTS_TOTAL, REQUEST_LATENCY_MS, generate_latest, CONTENT_TYPE_LATEST
+import hmac
+import time
 import uuid
+from datetime import datetime
+from typing import Optional
+
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from prometheus_fastapi_instrumentator import Instrumentator
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi.util import get_remote_address
+from sqlalchemy import desc, func, select, text
+from sqlalchemy.ext.asyncio import AsyncSession
+from prometheus_fastapi_instrumentator import metrics as prometheus_metrics
+
+from app.config import get_settings
+from app.logging_utils import logger
+from app.metrics import WEBHOOK_REQUESTS_TOTAL
+from app.models import Message, MessageResponse, WebhookPayload
+from app.storage import get_db, init_db, insert_message
 
 settings = get_settings()
 
+limiter = Limiter(key_func=get_remote_address, default_limits=["100/minute"])
 app = FastAPI()
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
+
+
+# --- Security Middlewares ---
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], # Adjust for production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])
+
+# --- Instrumentator ---
+instrumentator = Instrumentator()
+instrumentator.add(prometheus_metrics.requests(metric_name="http_requests_total", should_include_handler=True, should_include_method=True, should_include_status=True))
+instrumentator.instrument(app).expose(app)
+
+
 
 # --- Middleware ---
 
@@ -48,8 +79,9 @@ async def log_and_metrics_middleware(request: Request, call_next):
         log_context["status"] = status_code
         
         # Update Metrics
-        HTTP_REQUESTS_TOTAL.labels(path=request.url.path, status=str(status_code)).inc()
-        REQUEST_LATENCY_MS.observe(latency)
+        # HTTP_REQUESTS_TOTAL.labels(path=request.url.path, status=str(status_code)).inc()
+        # REQUEST_LATENCY_MS.observe(latency)
+
         
         # Log
         logger.info("Request processed", extra=log_context)
@@ -66,7 +98,7 @@ async def verify_signature(request: Request, x_signature: str = Header(None)):
     if not x_signature:
         WEBHOOK_REQUESTS_TOTAL.labels(result="invalid_signature").inc()
         logger.error("Missing X-Signature header")
-        raise HTTPException(status_code=401, detail={"detail": "invalid signature"})
+        raise HTTPException(status_code=401, detail="invalid signature")
     
     body = await request.body()
     computed_sig = hmac.new(
@@ -78,7 +110,7 @@ async def verify_signature(request: Request, x_signature: str = Header(None)):
     if not hmac.compare_digest(computed_sig, x_signature):
         WEBHOOK_REQUESTS_TOTAL.labels(result="invalid_signature").inc()
         logger.error("Invalid X-Signature")
-        raise HTTPException(status_code=401, detail={"detail": "invalid signature"})
+        raise HTTPException(status_code=401, detail="invalid signature")
 
 # --- Routes ---
 
@@ -90,9 +122,11 @@ async def startup_event():
         logger.critical("WEBHOOK_SECRET is missing!")
 
 @app.post("/webhook")
+@limiter.limit("60/minute") # Stricter limit for webhooks
 async def webhook(
     payload: WebhookPayload,
     request: Request,
+
     db: AsyncSession = Depends(get_db),
     _verification: None = Depends(verify_signature)
 ):
@@ -105,12 +139,19 @@ async def webhook(
     
     inserted = await insert_message(db, payload)
     
+    # Store context for the middleware to log in the "One JSON line"
+    request.state.log_extra = {
+        "message_id": payload.message_id,
+        "dup": False,
+        "result": "created"
+    }
+    
     if inserted:
         WEBHOOK_REQUESTS_TOTAL.labels(result="created").inc()
-        logger.info("Message created", extra={"message_id": payload.message_id, "dup": False, "result": "created"})
     else:
+        request.state.log_extra["dup"] = True
+        request.state.log_extra["result"] = "duplicate"
         WEBHOOK_REQUESTS_TOTAL.labels(result="duplicate").inc()
-        logger.info("Duplicate message", extra={"message_id": payload.message_id, "dup": True, "result": "duplicate"})
         
     return {"status": "ok"}
 
@@ -118,7 +159,7 @@ async def webhook(
 async def get_messages(
     limit: int = 50,
     offset: int = 0,
-    from_: Optional[str] = fastapi.Query(None, alias="from"),
+    from_: Optional[str] = Query(None, alias="from"),
     since: Optional[datetime] = None,
     q: Optional[str] = None,
     db: AsyncSession = Depends(get_db)
@@ -162,7 +203,7 @@ async def get_messages(
         "offset": offset
     }
 
-import fastapi # imported late for alias usage above
+
 
 @app.get("/stats")
 async def get_stats(db: AsyncSession = Depends(get_db)):
@@ -214,8 +255,8 @@ async def health_ready(db: AsyncSession = Depends(get_db)):
     # Check DB
     try:
         await db.execute(text("SELECT 1"))
-    except Exception:
-        raise HTTPException(status_code=503, detail="Database not ready")
+    except Exception as err:
+        raise HTTPException(status_code=503, detail="Database not ready") from err
         
     # Check Secret
     if not settings.WEBHOOK_SECRET:
@@ -223,6 +264,7 @@ async def health_ready(db: AsyncSession = Depends(get_db)):
         
     return {"status": "ready"}
 
-@app.get("/metrics")
-async def metrics():
-    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+# @app.get("/metrics")
+# async def metrics():
+#     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+

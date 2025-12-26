@@ -1,20 +1,11 @@
-from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
+from prometheus_client import Counter
 
 # Metrics
-HTTP_REQUESTS_TOTAL = Counter(
-    "http_requests_total",
-    "Total number of HTTP requests",
-    ["path", "status"]
-)
+# Metrics
+# HTTP metrics are now handled by prometheus-fastapi-instrumentator
 
 WEBHOOK_REQUESTS_TOTAL = Counter(
     "webhook_requests_total",
     "Processing outcomes for webhook requests",
     ["result"]
-)
-
-REQUEST_LATENCY_MS = Histogram(
-    "request_latency_ms",
-    "Request latency in milliseconds",
-    buckets=(10, 50, 100, 200, 500, 1000, float("inf"))
 )

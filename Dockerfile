@@ -26,7 +26,11 @@ RUN pip install --no-cache /wheels/*
 
 COPY . .
 
-# Create directory for sqlite db
+# Create directory for sqlite db and set permissions
 RUN mkdir -p /data
+RUN adduser --disabled-password --gecos "" appuser && chown -R appuser:appuser /app /data
+
+USER appuser
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+

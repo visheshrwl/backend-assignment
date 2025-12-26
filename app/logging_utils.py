@@ -1,8 +1,10 @@
 import logging
-import json
 import sys
+
 from pythonjsonlogger import jsonlogger
+
 from app.config import get_settings
+
 
 class CustomJsonFormatter(jsonlogger.JsonFormatter):
     def add_fields(self, log_record, record, message_dict):
@@ -32,7 +34,8 @@ def setup_logging():
     logger.addHandler(logHandler)
     
     # Set level for libraries
-    logging.getLogger("uvicorn.access").setLevel(logging.WARNING) # Suppress default uvicorn access logs to avoid double logging
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING) 
+    # Suppress default uvicorn access logs to avoid double logging
     
     return logger
 

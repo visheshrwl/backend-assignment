@@ -1,9 +1,10 @@
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from sqlalchemy import select, func
+import logging
+
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
 from app.config import get_settings
 from app.models import Base, Message, WebhookPayload
-from sqlalchemy.exc import IntegrityError
-import logging
 
 logger = logging.getLogger(__name__)
 

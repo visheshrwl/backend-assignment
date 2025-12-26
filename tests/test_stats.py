@@ -1,6 +1,9 @@
-import pytest
 from datetime import datetime
+
+import pytest
+
 from app.models import Message
+
 
 @pytest.mark.asyncio
 async def test_stats_empty(client, db_session):

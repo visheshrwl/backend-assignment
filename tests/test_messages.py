@@ -1,8 +1,9 @@
+from datetime import datetime
+
 import pytest
-import asyncio
-from datetime import datetime, timedelta
+
 from app.models import Message
-from sqlalchemy import text
+
 
 # Helper to populate DB
 async def seed_messages(session):

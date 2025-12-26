@@ -1,61 +1,109 @@
 # Lyftr AI Backend Assignment
 
-Containerized Webhook API built with FastAPI, SQLite, and Docker.
+A production-ready, containerized webhook API built with **Python 3.11**, **FastAPI**, and **SQLite**. This project adheres to 12-factor principles and includes features like Prometheus/Grafana observability, rate limiting, and strict CI/CD.
 
-## Setup Used
+## Tech Stack
+*   **Framework**: FastAPI (Async)
+*   **Database**: SQLite (via `aiosqlite` + `SQLAlchemy`)
+*   **Containerization**: Docker & Docker Compose
+*   **Observability**: Prometheus & Grafana
+*   **Testing**: Pytest (Asyncio)
 
-VSCode + Gemini (Google Deepmind) + Copilot
-
-## How to Run
+## Quick Start
 
 ### Prerequisites
-- Docker & Docker Compose
-- Make (optional, for shortcuts)
+*   Docker & Docker Compose
+*   Make (optional)
 
-### commands
+### Running the Stack
+1.  **Start Services**:
+    ```bash
+    make up
+    # OR: docker compose up -d --build
+    ```
+    This spins up three containers:
+    *   `api`: The application (Port 8000)
+    *   `prometheus`: Metrics scraper (Port 9090)
+    *   `grafana`: Dashboards (Port 3000)
 
-1. **Start the Stack**
-   ```bash
-   make up
-   # OR
-   docker compose up -d --build
-   ```
-   The API will be available at http://localhost:8000.
+2.  **Verify Status**:
+    ```bash
+    curl http://localhost:8000/health/live
+    # {"status":"ok"}
+    ```
 
-2. **Check Logs**
-   ```bash
-   make logs
-   # OR
-   docker compose logs -f api
-   ```
+3.  **Shutdown**:
+    ```bash
+    make down
+    ```
 
-3. **Shutdown**
-   ```bash
-   make down
-   ```
+## Configuration
+The application is configured via Environment Variables (defined in `docker-compose.yml` or `.env`):
 
-4. **Run Tests**
-   ```bash
-   make test
-   # OR
-   pytest
-   ```
+| Variable | Description | Default |
+| :--- | :--- | :--- |
+| `DATABASE_URL` | SQLAlchemy connection string | `sqlite+aiosqlite:////data/app.db` |
+| `WEBHOOK_SECRET` | Secret for HMAC signature validation | `testsecret` |
+| `LOG_LEVEL` | Logging level (`INFO`, `DEBUG`) | `INFO` |
 
-## Endpoints
+## API Documentation
 
-- `POST /webhook`: Ingest messages (requires HMAC `X-Signature`).
-- `GET /messages`: List messages (pagination, filters).
-- `GET /stats`: Analytics.
-- `GET /health/live`, `/health/ready`: Probes.
-- `GET /metrics`: Prometheus metrics.
+### `POST /webhook`
+Ingests messages with HMAC verification and idempotency.
+*   **Headers**: `X-Signature` (HMAC-SHA256 of body using `WEBHOOK_SECRET`).
+*   **Rate Limit**: 60 req/min.
+*   **Responses**:
+    *   `200 OK`: Message accepted (created or duplicate).
+    *   `401 Unauthorized`: Invalid/Missing signature.
+    *   `422 Unprocessable Entity`: Invalid JSON payload.
+    *   `429 Too Many Requests`: Rate limit exceeded.
 
-## Design Decisions
+### `GET /messages`
+List messages with pagination and filtering.
+*   **Params**:
+    *   `limit` (1-100), `offset` (0+).
+    *   `from` (filter by sender).
+    *   `since` (ISO-8601 timestamp).
+    *   `q` (Text search).
 
-### HMAC Verification
-Implemented as a FastAPI dependency (`verify_signature`) to ensure it runs before the main handler but after basic request parsing. It re-computes the HMAC-SHA256 of the raw request body and uses `hmac.compare_digest` to prevent timing attacks.
+### `GET /stats`
+Returns analytical data:
+*   Total message count.
+*   Unique sender count.
+*   Top 10 senders by volume.
+*   First/Last message timestamps.
 
-### Pagination
-Using standard `limit` and `offset` query parameters. Validation ensures `limit` is between 1 and 100 to prevent DOS.
+### `GET /metrics`
+Prometheus endpoints exposing:
+*   `http_requests_total`: Counter by `path`, `method`, `status`.
+*   `webhook_requests_total`: Counter by `result` (`created`, `duplicate`, `invalid_signature`).
+*   `http_request_duration_seconds`: Histogram of latency.
+
+### `GET /health/live` & `/health/ready`
+Liveness and Readiness probes for Kubernetes/Docker.
+
+## Observability & Quality
+
+### Grafana Dashboard
+Access Grafana at **http://localhost:3000** (User: `admin`, Pass: `admin`).
+A pre-provisioned **"Backend Dashboard"** is available, visualizing:
+*   Request Rate (RPM)
+*   p95 & p99 Latency
+*   Webhook Outcomes & Error Rates
 
 ### Logging
-Used `python-json-logger` to format logs as structured JSON. A middleware captures request context (`request_id`, `latency_ms`, `status`) and ensures every request emits exactly one structured log line, plus application-specific logs for the webhook actions.
+Logs are emitted as **Structured JSON** for easy parsing (e.g., by Datadog/Splunk).
+```json
+{"ts": "2025-01-01T10:00:00Z", "level": "INFO", "request_id": "...", "method": "POST", "path": "/webhook", "status": 200, "latency_ms": 12.5, "message_id": "m1", "result": "created"}
+```
+
+### Development
+Run tests and static analysis:
+```bash
+# Run Unit Tests
+make test
+# OR: docker compose run --rm api pytest
+
+# Run Linting (Ruff & Mypy)
+docker compose run --rm api sh -c "ruff check . && mypy ."
+```

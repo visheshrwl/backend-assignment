@@ -1,6 +1,6 @@
-import os
-from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
 
 class Settings(BaseSettings):
     DATABASE_URL: str = Field(..., description="Database connection string, e.g. sqlite+aiosqlite:////data/app.db")
